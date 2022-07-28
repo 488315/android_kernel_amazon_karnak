@@ -301,3 +301,7 @@ config UEFI_CPER_X86
 	bool
 	depends on UEFI_CPER && X86
 	default y
+
+config EFI_EARLYCON
+	bool "EFI early console support"
+	depends on FB_EARLYCON && !IA64

@@ -74,7 +74,7 @@ static void __init init_screen_info(void)
 					    screen_info.lfb_size);
 
 		if (IS_ENABLED(CONFIG_EFI_EARLYCON))
-			efi_earlycon_reprobe();
+			//efi_earlycon_reprobe();
 	}
 }
 
