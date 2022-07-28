@@ -635,6 +635,17 @@ config FB_VESA
 	  You will get a boot time penguin logo at no additional cost. Please
 	  read <file:Documentation/fb/vesafb.rst>. If unsure, say Y.
 
+config FB_EARLYCON
+	bool "Generic framebuffer early console"
+	depends on FB && SERIAL_EARLYCON && !ARM
+	select FONT_SUPPORT
+	select ARCH_USE_MEMREMAP_PROT
+	help
+	  Say Y here if you want early console support for firmware established
+	  linear framebuffer. Unless you are using EFI framebuffer, you need to
+	  specify framebuffer geometry and address in device-tree or in kernel
+	  command line.
+
 config FB_EFI
 	bool "EFI-based Framebuffer Support"
 	depends on (FB = y) && !IA64 && EFI
