@@ -180,9 +180,14 @@ else
 KBUILD_IMAGE	:= $(boot)/Image.gz
 endif
 
-all:	$(notdir $(KBUILD_IMAGE))
-
 image.fit: dtbs
+
+KBUILD_DTBS := dtbs
+
+dtbs: prepare scripts
+	$(Q)$(MAKE) $(build)=$(boot)/dts
+
+all: $(notdir $(KBUILD_IMAGE))
 
 vmlinuz.efi image.fit: Image
 
