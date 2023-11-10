@@ -174,6 +174,12 @@ else
 KBUILD_IMAGE	:= $(boot)/vmlinuz.efi
 endif
 
+ifeq ($(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE),y)
+KBUILD_IMAGE	:= Image.gz-dtb
+else
+KBUILD_IMAGE	:= Image.gz
+endif
+
 all:	$(notdir $(KBUILD_IMAGE))
 
 image.fit: dtbs
