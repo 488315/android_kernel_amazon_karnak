@@ -185,10 +185,14 @@ all:	$(notdir $(KBUILD_IMAGE))
 image.fit: dtbs
 
 vmlinuz.efi image.fit: Image
+
 $(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 Image.%: Image
+	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
+
+Image-dtb Image.gz-dtb: vmlinux scripts dtbs
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 ifeq ($(CONFIG_COMPRESSED_INSTALL),y)
@@ -196,6 +200,7 @@ ifeq ($(CONFIG_COMPRESSED_INSTALL),y)
 else
  DEFAULT_KBUILD_IMAGE = $(boot)/Image
 endif
+
 
 install: KBUILD_IMAGE := $(DEFAULT_KBUILD_IMAGE)
 install zinstall:
