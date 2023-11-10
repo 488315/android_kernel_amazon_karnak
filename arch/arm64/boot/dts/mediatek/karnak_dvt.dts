@@ -26,6 +26,17 @@
 	chosen {
 		bootargs = "console=ttyS0,921600n1 root=/dev/ram
 		initrd=0x44000200,0x200000";
+		stdout-path = "display0";
+	};
+
+	framebuffer0: framebuffer@0x98800000 {
+		compatible = "simple-framebuffer";
+		reg = <0x0 0x98800000 0x0 0xe00000>;
+		width = <800>;
+		height = <1280>;
+		stride = <3200>;
+		format = "a8b8g8r8";
+		status = "okay";
 	};
 
 	mtcpufreq {
