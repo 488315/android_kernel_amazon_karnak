@@ -356,6 +356,12 @@ $(obj)/%: $(src)/%_shipped
 #	and add target to 'targets' so that we know we have to
 #	read in the saved command line
 
+# cat
+# ---------------------------------------------------------------------------
+# Concatentate multiple files together
+quiet_cmd_cat = CAT     $@
+cmd_cat = (cat $(filter-out FORCE,$^) > $@) || (rm -f $@; false)
+
 # Linking
 # ---------------------------------------------------------------------------
 
