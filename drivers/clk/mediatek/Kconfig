@@ -520,6 +520,14 @@ config COMMON_CLK_MT8167_VDECSYS
 	help
 	  This driver supports MediaTek MT8167 vdecsys clocks.
 
+config COMMON_CLK_MT8163
+	bool "Clock driver for MediaTek MT8163"
+	depends on ARCH_MEDIATEK || COMPILE_TEST
+	select COMMON_CLK_MEDIATEK
+	default ARCH_MEDIATEK
+	help
+	  This driver supports MediaTek MT8163 clocks.
+
 config COMMON_CLK_MT8173
 	tristate "Clock driver for MediaTek MT8173"
 	depends on ARM64 || COMPILE_TEST
