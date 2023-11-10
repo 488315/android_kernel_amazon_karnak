@@ -180,6 +180,9 @@ Image.%: Image
 Image.gz-dtb: vmlinux scripts dtbs
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
+Image-dtb Image.gz-dtb: vmlinux scripts dtbs
+	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
+
 install: install-image := Image
 zinstall: install-image := Image.gz
 install zinstall:
