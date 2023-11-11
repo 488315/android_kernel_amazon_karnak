@@ -19,6 +19,7 @@
 #include <dt-bindings/power/mt7622-power.h>
 #include <dt-bindings/power/mt7623a-power.h>
 #include <dt-bindings/power/mt8173-power.h>
+#include <dt-bindings/power/mt8163-power.h>
 
 #define MTK_POLL_DELAY_US   10
 #define MTK_POLL_TIMEOUT    USEC_PER_SEC
@@ -636,6 +637,75 @@ static const struct scp_domain_data scp_domain_data_mt2701[] = {
 };
 
 /*
+ * MT8163 power domain support
+ */
+static const struct scp_domain_data scp_domain_data_mt8163[] = {
+
+	[MT8163_POWER_DOMAIN_VDEC] = {
+		.name = "vdec",
+		.sta_mask = PWR_STATUS_VDEC,
+		.ctl_offs = SPM_VDE_PWR_CON,
+		.sram_pdn_bits = GENMASK(11, 8),
+		.sram_pdn_ack_bits = GENMASK(12, 12),
+		.clk_id = {CLK_MM},
+	},
+	[MT8163_POWER_DOMAIN_VENC] = {
+		.name = "venc",
+		.sta_mask = PWR_STATUS_VENC,
+		.ctl_offs = SPM_VEN_PWR_CON,
+		.sram_pdn_bits = GENMASK(11, 8),
+		.sram_pdn_ack_bits = GENMASK(15, 12),
+		.clk_id = {CLK_MM},
+	},
+	[MT8163_POWER_DOMAIN_ISP] = {
+		.name = "isp",
+		.sta_mask = PWR_STATUS_ISP,
+		.ctl_offs = SPM_ISP_PWR_CON,
+		.sram_pdn_bits = GENMASK(11, 8),
+		.sram_pdn_ack_bits = GENMASK(13, 12),
+		.clk_id = {CLK_MM},
+	},
+	[MT8163_POWER_DOMAIN_DISP] = {
+		.name = "mm",
+		.sta_mask = PWR_STATUS_DISP,
+		.ctl_offs = SPM_DIS_PWR_CON,
+		.sram_pdn_bits = GENMASK(11, 8),
+		.sram_pdn_ack_bits = GENMASK(12, 12),
+		.clk_id = {CLK_MM},
+		.bus_prot_mask = MT8163_TOP_AXI_PROT_EN_MM_M0,
+	},
+	[MT8163_POWER_DOMAIN_MFG_ASYNC] = {
+		.name = "mfg_async",
+		.sta_mask = PWR_STATUS_MFG_ASYNC,
+		.ctl_offs = SPM_MFG_ASYNC_PWR_CON,
+		.sram_pdn_bits = GENMASK(11, 8),
+		.sram_pdn_ack_bits = 0,
+		.clk_id = {CLK_NONE},
+		.bus_prot_mask = MT8163_TOP_AXI_PROT_EN_MFG_M0 |
+			MT8163_TOP_AXI_PROT_EN_MFG_SNOOP_OUT,
+	},
+	[MT8163_POWER_DOMAIN_MFG] = {
+		.name = "mfg",
+		.sta_mask = PWR_STATUS_MFG,
+		.ctl_offs = SPM_MFG_PWR_CON,
+		.sram_pdn_bits = GENMASK(13, 8),
+		.sram_pdn_ack_bits = GENMASK(16, 16),
+		.clk_id = {CLK_MFG},
+	},
+	[MT8163_POWER_DOMAIN_CONN] = {
+		.name = "conn",
+		.sta_mask = PWR_STATUS_CONN,
+		.ctl_offs = SPM_CONN_PWR_CON,
+		.sram_pdn_bits = GENMASK(8, 8),
+		.sram_pdn_ack_bits = 0,
+		.clk_id = {CLK_NONE},
+		.bus_prot_mask = MT8163_TOP_AXI_PROT_EN_CCI_M2 |
+			MT8163_TOP_AXI_PROT_EN_CONN2EMI |
+			MT8163_TOP_AXI_PROT_EN_CONN2PERI,
+	},
+};
+
+/*
  * MT2712 power domain support
  */
 static const struct scp_domain_data scp_domain_data_mt2712[] = {
@@ -1065,6 +1135,18 @@ static const struct scp_soc_data mt7623a_data = {
 	.bus_prot_reg_update = true,
 };
 
+static const struct scp_soc_data mt8163_data = {
+	.domains = scp_domain_data_mt8163,
+	.num_domains = ARRAY_SIZE(scp_domain_data_mt8163),
+	.subdomains = scp_subdomain_mt8173,
+	.num_subdomains = ARRAY_SIZE(scp_subdomain_mt8173),
+	.regs = {
+		.pwr_sta_offs = SPM_PWR_STATUS,
+		.pwr_sta2nd_offs = SPM_PWR_STATUS_2ND
+	},
+	.bus_prot_reg_update = true,
+};
+
 static const struct scp_soc_data mt8173_data = {
 	.domains = scp_domain_data_mt8173,
 	.num_domains = ARRAY_SIZE(scp_domain_data_mt8173),
@@ -1100,6 +1182,9 @@ static const struct of_device_id of_scpsys_match_tbl[] = {
 	}, {
 		.compatible = "mediatek,mt8173-scpsys",
 		.data = &mt8173_data,
+	}, {
+		.compatible = "mediatek,mt8163-scpsys",
+		.data = &mt8163_data,
 	}, {
 		/* sentinel */
 	}
