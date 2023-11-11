@@ -138,4 +138,7 @@ struct ramoops_platform_data {
 	struct persistent_ram_ecc_info ecc_info;
 };
 
+void ramoops_console_write_buf(const char *buf, size_t size);
+void ramoops_append_plat_log(const char *fmt, ...);
+
 #endif

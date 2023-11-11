@@ -32,8 +32,13 @@
 #include <linux/uaccess.h>
 #include <linux/jiffies.h>
 #include <linux/workqueue.h>
+#include <linux/io.h>
 
 #include "internal.h"
+
+#ifdef __aarch64__
+#define memcpy memcpy_toio
+#endif
 
 /*
  * We defer making "oops" entries appear in pstore - see
@@ -487,6 +492,8 @@ static void pstore_unregister_kmsg(void)
 }
 
 #ifdef CONFIG_PSTORE_CONSOLE
+
+#ifdef CONFIG_PSTORE_CONSOLE_ALT
 static void pstore_console_write(struct console *con, const char *s, unsigned c)
 {
 	struct pstore_record record;
@@ -501,9 +508,27 @@ static void pstore_console_write(struct console *con, const char *s, unsigned c)
 	record.size = c;
 	psinfo->write(&record);
 }
+#endif
+
+static void pstore_simp_console_write(struct console *con, const char *s,
+                                      unsigned int c)
+{
+	struct pstore_record record;
+
+    if (psinfo)
+        psinfo->write(&record);
+}
+
+void pstore_bconsole_write(struct console *con, const char *s, unsigned int c)
+{
+	struct pstore_record record;
+
+    if (psinfo)
+       psinfo->write(&record);
+}
 
 static struct console pstore_console = {
-	.write	= pstore_console_write,
+	.write	= pstore_simp_console_write,
 	.index	= -1,
 };
 

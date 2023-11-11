@@ -27,12 +27,20 @@
 #define RAMOOPS_KERNMSG_HDR "===="
 #define MIN_MEM_SIZE 4096UL
 
+#ifdef __aarch64__
+#define memcpy memcpy_toio
+#endif
+
+
 static ulong record_size = MIN_MEM_SIZE;
 module_param(record_size, ulong, 0400);
 MODULE_PARM_DESC(record_size,
 		"size of each dump done on oops/panic");
-
+#ifdef CONFIG_PSTORE_CONSOLE_SIZE
+static ulong ramoops_console_size = CONFIG_PSTORE_CONSOLE_SIZE;
+#else
 static ulong ramoops_console_size = MIN_MEM_SIZE;
+#endif
 module_param_named(console_size, ramoops_console_size, ulong, 0400);
 MODULE_PARM_DESC(console_size, "size of kernel console log");
 
@@ -40,16 +48,32 @@ static ulong ramoops_ftrace_size = MIN_MEM_SIZE;
 module_param_named(ftrace_size, ramoops_ftrace_size, ulong, 0400);
 MODULE_PARM_DESC(ftrace_size, "size of ftrace log");
 
+#ifdef CONFIG_PSTORE_PMSG_SIZE
+static ulong ramoops_pmsg_size = CONFIG_PSTORE_PMSG_SIZE;
+#else
 static ulong ramoops_pmsg_size = MIN_MEM_SIZE;
+#endif
 module_param_named(pmsg_size, ramoops_pmsg_size, ulong, 0400);
 MODULE_PARM_DESC(pmsg_size, "size of user space message log");
 
+#ifdef CONFIG_PSTORE_MEM_ADDR
+static unsigned long long mem_address = CONFIG_PSTORE_MEM_ADDR;
+#else
 static unsigned long long mem_address;
+#endif
 module_param_hw(mem_address, ullong, other, 0400);
 MODULE_PARM_DESC(mem_address,
 		"start of reserved RAM used to store oops/panic logs");
 
+static char *mem_name;
+module_param_named(mem_name, mem_name, charp, 0400);
+MODULE_PARM_DESC(mem_name, "name of kernel param that holds addr");
+
+#ifdef CONFIG_PSTORE_MEM_SIZE
+static ulong mem_size = CONFIG_PSTORE_MEM_SIZE;
+#else
 static ulong mem_size;
+#endif
 module_param(mem_size, ulong, 0400);
 MODULE_PARM_DESC(mem_size,
 		"size of reserved RAM used to store oops/panic logs");
@@ -81,6 +105,7 @@ struct ramoops_context {
 	struct persistent_ram_zone *cprz;	/* Console zone */
 	struct persistent_ram_zone **fprzs;	/* Ftrace zones */
 	struct persistent_ram_zone *mprz;	/* PMSG zone */
+	struct persistent_ram_zone *bprz; /* simple lockless buffer console */
 	phys_addr_t phys_addr;
 	unsigned long size;
 	unsigned int memtype;
@@ -98,6 +123,7 @@ struct ramoops_context {
 	unsigned int max_ftrace_cnt;
 	unsigned int ftrace_read_cnt;
 	unsigned int pmsg_read_cnt;
+	unsigned int bconsole_read_cnt;
 	struct pstore_info pstore;
 };
 
@@ -174,6 +200,23 @@ static bool prz_ok(struct persistent_ram_zone *prz)
 			   persistent_ram_ecc_string(prz, NULL, 0));
 }
 
+#define PLAT_LOG_BUFFER_SIZE 4096
+static char plat_log_buf[PLAT_LOG_BUFFER_SIZE + 1];
+static size_t plat_log_size;
+void ramoops_append_plat_log(const char *fmt, ...)
+{
+	va_list ap;
+
+	if (PLAT_LOG_BUFFER_SIZE > plat_log_size) {
+		va_start(ap, fmt);
+		plat_log_size += vscnprintf(plat_log_buf + plat_log_size, PLAT_LOG_BUFFER_SIZE - plat_log_size, fmt, ap);
+		va_end(ap);
+	} else {
+		pr_err("logging buffer size(%zu) may greater than PLAT_LOG_BUFFER_SIZE(%zu)\n",
+			plat_log_size, (size_t)PLAT_LOG_BUFFER_SIZE);
+	}
+}
+
 static ssize_t ramoops_pstore_read(struct pstore_record *record)
 {
 	ssize_t size = 0;
@@ -210,6 +253,9 @@ static ssize_t ramoops_pstore_read(struct pstore_record *record)
 
 	if (!prz_ok(prz) && !cxt->console_read_cnt++)
 		prz = ramoops_get_next_prz(&cxt->cprz, 0 /* single */, record);
+
+	if (!prz_ok(prz) && !cxt->pmsg_read_cnt++)
+		prz = ramoops_get_next_prz(&cxt->mprz, 0 /* single */, record);
 
 	if (!prz_ok(prz) && !cxt->pmsg_read_cnt++)
 		prz = ramoops_get_next_prz(&cxt->mprz, 0 /* single */, record);
@@ -264,6 +310,8 @@ static ssize_t ramoops_pstore_read(struct pstore_record *record)
 	}
 
 	size = persistent_ram_old_size(prz) - header_length;
+	if (record->type == PSTORE_TYPE_CONSOLE && plat_log_size)
+		size += (plat_log_size + 1);
 
 	/* ECC correction notice */
 	record->ecc_notice_size = persistent_ram_ecc_string(prz, NULL, 0);
@@ -274,8 +322,19 @@ static ssize_t ramoops_pstore_read(struct pstore_record *record)
 		goto out;
 	}
 
-	memcpy(record->buf, (char *)persistent_ram_old(prz) + header_length,
-	       size);
+	if (record->type == PSTORE_TYPE_CONSOLE && plat_log_size) {
+		memcpy(record->buf,
+			(char *)persistent_ram_old(prz) + header_length,
+			size - plat_log_size - 1);
+		memcpy(record->buf + (size - plat_log_size - 1),
+			plat_log_buf,
+			plat_log_size);
+		*(char *)(record->buf + size - 1) = '\0';
+	} else {
+		memcpy(record->buf,
+			(char *)persistent_ram_old(prz) + header_length,
+			size);
+	}
 
 	persistent_ram_ecc_string(prz, record->buf + size,
 				  record->ecc_notice_size + 1);
@@ -310,11 +369,16 @@ static int notrace ramoops_pstore_write(struct pstore_record *record)
 	struct ramoops_context *cxt = record->psi->data;
 	struct persistent_ram_zone *prz;
 	size_t size, hlen;
-
 	if (record->type == PSTORE_TYPE_CONSOLE) {
-		if (!cxt->cprz)
-			return -ENOMEM;
-		persistent_ram_write(cxt->cprz, record->buf, record->size);
+		if (record->reason == 0) {
+			if (!cxt->cprz)
+				return -ENOMEM;
+			persistent_ram_write(cxt->cprz, record->buf, record->size);
+		} else {
+			if (!cxt->bprz)
+				return -ENOMEM;
+			persistent_ram_write(cxt->bprz, record->buf, record->size);
+		}
 		return 0;
 	} else if (record->type == PSTORE_TYPE_FTRACE) {
 		int zonenum;
@@ -714,6 +778,12 @@ static int ramoops_parse_dt(struct platform_device *pdev,
 	return 0;
 }
 
+void notrace ramoops_console_write_buf(const char *buf, size_t size)
+{
+	struct ramoops_context *cxt = &oops_cxt;
+	persistent_ram_write(cxt->cprz, buf, size);
+}
+
 static int ramoops_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -775,10 +845,13 @@ static int ramoops_probe(struct platform_device *pdev)
 	cxt->pmsg_size = pdata->pmsg_size;
 	cxt->flags = pdata->flags;
 	cxt->ecc_info = pdata->ecc_info;
+	pr_notice("pstore:address is 0x%lx, size is 0x%lx, console_size is 0x%zx, pmsg_size is 0x%zx\n",
+			(unsigned long)cxt->phys_addr, cxt->size,
+			cxt->console_size, cxt->pmsg_size);
 
 	paddr = cxt->phys_addr;
 
-	dump_mem_sz = cxt->size - cxt->console_size - cxt->ftrace_size
+		dump_mem_sz = cxt->size - cxt->console_size * 2 - cxt->ftrace_size
 			- cxt->pmsg_size;
 	err = ramoops_init_przs("dmesg", dev, cxt, &cxt->dprzs, &paddr,
 				dump_mem_sz, cxt->record_size,
