@@ -211,6 +211,11 @@ install: KBUILD_IMAGE := $(DEFAULT_KBUILD_IMAGE)
 install zinstall:
 	$(call cmd,install)
 
+MTK_PLATFORM := $(CONFIG_MTK_PLATFORM:"%"=%)
+MTK_PROJECT := $(CONFIG_ARCH_MTK_PROJECT:"%"=%)
+export MTK_PLATFORM MTK_PROJECT MTK_TARGET_PROJECT
+-include $(srctree)/scripts/drvgen/drvgen.mk
+
 archprepare:
 	$(Q)$(MAKE) $(build)=arch/arm64/tools kapi
 ifeq ($(CONFIG_ARM64_ERRATUM_843419),y)

@@ -1,0 +1,19 @@
+menu "Mediatek Project Configuration"
+menuconfig MEDIATEK_SOLUTION
+	bool "MediaTek Properitary Configuration"
+	select FW_LOADER_USER_HELPER_FALLBACK
+	select I2C
+	help
+	  Check this to enable MediaTek proprietary configuration.
+
+config MTK_PLATFORM
+	string "MTK platform name"
+	default "MT8163"
+
+config ARCH_MTK_PROJECT
+	string "MTK project name"
+endmenu
+
+menu "MTK Ram Configuration"
+source "drivers/misc/mediatek/ram_console/Kconfig"
+endmenu
