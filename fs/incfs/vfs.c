@@ -31,13 +31,14 @@
 
 static int incfs_remount_fs(struct super_block *sb, int *flags, char *data);
 
-static int dentry_revalidate(struct dentry *dentry, unsigned int flags);
+static int dentry_revalidate(struct inode *dir, const struct qstr *name,
+		struct dentry *dentry, unsigned int flags);
 static void dentry_release(struct dentry *d);
 
 static int iterate_incfs_dir(struct file *file, struct dir_context *ctx);
 static struct dentry *dir_lookup(struct inode *dir_inode,
 		struct dentry *dentry, unsigned int flags);
-static int dir_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+static struct dentry *dir_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		     struct dentry *dentry, umode_t mode);
 static int dir_unlink(struct inode *dir, struct dentry *dentry);
 static int dir_link(struct dentry *old_dentry, struct inode *dir,
@@ -57,9 +58,9 @@ static long incfs_compat_ioctl(struct file *file, unsigned int cmd,
 			 unsigned long arg);
 #endif
 
-static struct inode *alloc_inode(struct super_block *sb);
-static void free_inode(struct inode *inode);
-static void evict_inode(struct inode *inode);
+static struct inode *incfs_alloc_inode(struct super_block *sb);
+static void incfs_free_inode(struct inode *inode);
+static void incfs_evict_inode(struct inode *inode);
 
 static int incfs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			 struct iattr *ia);
@@ -73,15 +74,15 @@ static ssize_t incfs_setxattr(struct mnt_idmap *idmap, struct dentry *d,
 			      int flags);
 static ssize_t incfs_listxattr(struct dentry *d, char *list, size_t size);
 
-static int show_options(struct seq_file *, struct dentry *);
+static int incfs_show_options(struct seq_file *, struct dentry *);
 
 static const struct super_operations incfs_super_ops = {
 	.statfs = simple_statfs,
 	.remount_fs = incfs_remount_fs,
-	.alloc_inode	= alloc_inode,
-	.destroy_inode	= free_inode,
-	.evict_inode = evict_inode,
-	.show_options = show_options
+	.alloc_inode	= incfs_alloc_inode,
+	.destroy_inode	= incfs_free_inode,
+	.evict_inode = incfs_evict_inode,
+	.show_options = incfs_show_options
 };
 
 static int dir_rename_wrap(struct mnt_idmap *idmap, struct inode *old_dir,
@@ -450,7 +451,6 @@ static struct dentry *open_or_create_special_dir(struct dentry *backing_dir,
 {
 	struct dentry *index_dentry;
 	struct inode *backing_inode = d_inode(backing_dir);
-	int err = 0;
 
 	index_dentry = incfs_lookup_dentry(backing_dir, name);
 	if (!index_dentry) {
@@ -465,12 +465,12 @@ static struct dentry *open_or_create_special_dir(struct dentry *backing_dir,
 
 	/* Index needs to be created. */
 	inode_lock_nested(backing_inode, I_MUTEX_PARENT);
-	err = vfs_mkdir(&nop_mnt_idmap, backing_inode, index_dentry, 0777);
+	index_dentry = vfs_mkdir(&nop_mnt_idmap, backing_inode, index_dentry, 0777);
 	inode_unlock(backing_inode);
 
-	if (err) {
+	if (IS_ERR(index_dentry)) {
 		dput(index_dentry);
-		return ERR_PTR(err);
+		return ERR_CAST(index_dentry);
 	}
 
 	if (!d_really_is_positive(index_dentry) ||
@@ -1062,7 +1062,7 @@ out:
 	return ERR_PTR(err);
 }
 
-static int dir_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
+static struct dentry *dir_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	struct mount_info *mi = get_mount_info(dir->i_sb);
 	struct inode_info *dir_node = get_incfs_node(dir);
@@ -1072,11 +1072,11 @@ static int dir_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *
 
 
 	if (!mi || !dir_node || !dir_node->n_backing_inode)
-		return -EBADF;
+		return ERR_PTR(-EBADF);
 
 	err = mutex_lock_interruptible(&mi->mi_dir_struct_mutex);
 	if (err)
-		return err;
+		return ERR_PTR(err);
 
 	get_incfs_backing_path(dentry, &backing_path);
 	backing_dentry = backing_path.dentry;
@@ -1098,9 +1098,9 @@ static int dir_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *
 		goto out;
 	}
 	inode_lock_nested(dir_node->n_backing_inode, I_MUTEX_PARENT);
-	err = vfs_mkdir(idmap, dir_node->n_backing_inode, backing_dentry, mode | 0222);
+	backing_dentry = vfs_mkdir(idmap, dir_node->n_backing_inode, backing_dentry, mode | 0222);
 	inode_unlock(dir_node->n_backing_inode);
-	if (!err) {
+	if (!IS_ERR(backing_dentry)) {
 		struct inode *inode = NULL;
 
 		if (d_really_is_negative(backing_dentry) ||
@@ -1126,7 +1126,7 @@ path_err:
 	mutex_unlock(&mi->mi_dir_struct_mutex);
 	if (err)
 		pr_debug("incfs: %s err:%d\n", __func__, err);
-	return err;
+	return ERR_PTR(err);
 }
 
 /*
@@ -1543,7 +1543,8 @@ static int file_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int dentry_revalidate(struct dentry *d, unsigned int flags)
+static int dentry_revalidate(struct inode *dir, const struct qstr *name,
+			     struct dentry *d, unsigned int flags)
 {
 	struct path backing_path = {};
 	struct inode_info *info = get_incfs_node(d_inode(d));
@@ -1569,8 +1570,16 @@ static int dentry_revalidate(struct dentry *d, unsigned int flags)
 	}
 
 	if (backing_dentry->d_flags & DCACHE_OP_REVALIDATE) {
-		result = backing_dentry->d_op->d_revalidate(backing_dentry,
-				flags);
+		struct inode_info *dir_info = get_incfs_node(dir);
+		struct inode *backing_dir = dir_info ? dir_info->n_backing_inode : NULL;
+		struct name_snapshot n;
+
+		if (!backing_dir)
+			goto out;
+		take_dentry_name_snapshot(&n, backing_dentry);
+		result = backing_dentry->d_op->d_revalidate(backing_dir,
+			&n.name, backing_dentry, flags);
+		release_dentry_name_snapshot(&n);
 	} else
 		result = 1;
 
@@ -1589,7 +1598,7 @@ static void dentry_release(struct dentry *d)
 	d->d_fsdata = NULL;
 }
 
-static struct inode *alloc_inode(struct super_block *sb)
+static struct inode *incfs_alloc_inode(struct super_block *sb)
 {
 	struct inode_info *node = kzalloc(sizeof(*node), GFP_NOFS);
 
@@ -1600,14 +1609,14 @@ static struct inode *alloc_inode(struct super_block *sb)
 	return &node->n_vfs_inode;
 }
 
-static void free_inode(struct inode *inode)
+static void incfs_free_inode(struct inode *inode)
 {
 	struct inode_info *node = get_incfs_node(inode);
 
 	kfree(node);
 }
 
-static void evict_inode(struct inode *inode)
+static void incfs_evict_inode(struct inode *inode)
 {
 	struct inode_info *node = get_incfs_node(inode);
 
@@ -1978,7 +1987,7 @@ void incfs_kill_sb(struct super_block *sb)
 	}
 }
 
-static int show_options(struct seq_file *m, struct dentry *root)
+static int incfs_show_options(struct seq_file *m, struct dentry *root)
 {
 	struct mount_info *mi = get_mount_info(root->d_sb);
 

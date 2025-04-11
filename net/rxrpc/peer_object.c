@@ -235,7 +235,6 @@ struct rxrpc_peer *rxrpc_alloc_peer(struct rxrpc_local *local, gfp_t gfp,
 		peer->service_conns = RB_ROOT;
 		seqlock_init(&peer->service_conn_lock);
 		spin_lock_init(&peer->lock);
-		seqcount_init(&peer->mtu_lock);
 		peer->debug_id = atomic_inc_return(&rxrpc_debug_id);
 		peer->recent_srtt_us = UINT_MAX;
 		peer->cong_ssthresh = RXRPC_TX_MAX_WINDOW;
@@ -360,7 +359,7 @@ struct rxrpc_peer *rxrpc_lookup_peer(struct rxrpc_local *local,
 			return NULL;
 		}
 
-		spin_lock(&rxnet->peer_hash_lock);
+		spin_lock_bh(&rxnet->peer_hash_lock);
 
 		/* Need to check that we aren't racing with someone else */
 		peer = __rxrpc_lookup_peer_rcu(local, srx, hash_key);
@@ -373,7 +372,7 @@ struct rxrpc_peer *rxrpc_lookup_peer(struct rxrpc_local *local,
 				      &rxnet->peer_keepalive_new);
 		}
 
-		spin_unlock(&rxnet->peer_hash_lock);
+		spin_unlock_bh(&rxnet->peer_hash_lock);
 
 		if (peer)
 			rxrpc_free_peer(candidate);
@@ -423,10 +422,10 @@ static void __rxrpc_put_peer(struct rxrpc_peer *peer)
 
 	ASSERT(hlist_empty(&peer->error_targets));
 
-	spin_lock(&rxnet->peer_hash_lock);
+	spin_lock_bh(&rxnet->peer_hash_lock);
 	hash_del_rcu(&peer->hash_link);
 	list_del_init(&peer->keepalive_link);
-	spin_unlock(&rxnet->peer_hash_lock);
+	spin_unlock_bh(&rxnet->peer_hash_lock);
 
 	rxrpc_free_peer(peer);
 }
@@ -462,7 +461,7 @@ void rxrpc_destroy_all_peers(struct rxrpc_net *rxnet)
 			continue;
 
 		hlist_for_each_entry(peer, &rxnet->peer_hash[i], hash_link) {
-			pr_err("Leaked peer %u {%u} %pISp\n",
+			pr_err("Leaked peer %x {%u} %pISp\n",
 			       peer->debug_id,
 			       refcount_read(&peer->ref),
 			       &peer->srx.transport);
@@ -479,7 +478,7 @@ void rxrpc_destroy_all_peers(struct rxrpc_net *rxnet)
  */
 struct rxrpc_peer *rxrpc_kernel_get_call_peer(struct socket *sock, struct rxrpc_call *call)
 {
-	return call->peer;
+	return rxrpc_get_peer(call->peer, rxrpc_peer_get_application);
 }
 EXPORT_SYMBOL(rxrpc_kernel_get_call_peer);
 
@@ -521,3 +520,29 @@ const struct sockaddr *rxrpc_kernel_remote_addr(const struct rxrpc_peer *peer)
 		(peer ? &peer->srx.transport : &rxrpc_null_addr.transport);
 }
 EXPORT_SYMBOL(rxrpc_kernel_remote_addr);
+
+/**
+ * rxrpc_kernel_set_peer_data - Set app-specific data on a peer.
+ * @peer: The peer to alter
+ * @app_data: The data to set
+ *
+ * Set the app-specific data on a peer.  AF_RXRPC makes no effort to retain
+ * anything the data might refer to.  The previous app_data is returned.
+ */
+unsigned long rxrpc_kernel_set_peer_data(struct rxrpc_peer *peer, unsigned long app_data)
+{
+	return xchg(&peer->app_data, app_data);
+}
+EXPORT_SYMBOL(rxrpc_kernel_set_peer_data);
+
+/**
+ * rxrpc_kernel_get_peer_data - Get app-specific data from a peer.
+ * @peer: The peer to query
+ *
+ * Retrieve the app-specific data from a peer.
+ */
+unsigned long rxrpc_kernel_get_peer_data(const struct rxrpc_peer *peer)
+{
+	return peer->app_data;
+}
+EXPORT_SYMBOL(rxrpc_kernel_get_peer_data);

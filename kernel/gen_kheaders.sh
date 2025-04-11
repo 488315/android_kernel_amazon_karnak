@@ -41,9 +41,9 @@ all_dirs="$all_dirs $dir_list"
 # check include/generated/autoconf.h explicitly.
 #
 # Ignore them for md5 calculation to avoid pointless regeneration.
-headers_md5="$(find $all_dirs -name "*.h"			|
-		grep -v "include/generated/utsversion.h"	|
-		grep -v "include/generated/autoconf.h"	|
+headers_md5="$(find $all_dirs -name "*.h" -a			\
+		! -path include/generated/utsversion.h -a	\
+		! -path include/generated/autoconf.h		|
 		xargs ls -l | md5sum | cut -d ' ' -f1)"
 
 # Any changes to this script will also cause a rebuild of the archive.
@@ -73,6 +73,10 @@ fi
 for f in $dir_list;
 	do find "$f" -name "*.h";
 done | tar -c --dereference -f - -T - | tar -xf - -C "${tmpdir}"
+
+# Always exclude include/generated/utsversion.h
+# Otherwise, the contents of the tarball may vary depending on the build steps.
+rm -f "${tmpdir}/include/generated/utsversion.h"
 
 # Remove comments except SDPX lines
 # Use a temporary file to store directory contents to prevent find/xargs from

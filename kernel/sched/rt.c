@@ -29,7 +29,7 @@ static int sched_rt_handler(const struct ctl_table *table, int write, void *buff
 		size_t *lenp, loff_t *ppos);
 static int sched_rr_handler(const struct ctl_table *table, int write, void *buffer,
 		size_t *lenp, loff_t *ppos);
-static struct ctl_table sched_rt_sysctls[] = {
+static const struct ctl_table sched_rt_sysctls[] = {
 	{
 		.procname       = "sched_rt_period_us",
 		.data           = &sysctl_sched_rt_period,
@@ -130,9 +130,8 @@ void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime)
 
 	raw_spin_lock_init(&rt_b->rt_runtime_lock);
 
-	hrtimer_init(&rt_b->rt_period_timer, CLOCK_MONOTONIC,
-		     HRTIMER_MODE_REL_HARD);
-	rt_b->rt_period_timer.function = sched_rt_period_timer;
+	hrtimer_setup(&rt_b->rt_period_timer, sched_rt_period_timer, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL_HARD);
 }
 
 static inline void do_start_rt_bandwidth(struct rt_bandwidth *rt_b)
@@ -172,9 +171,8 @@ static void destroy_rt_bandwidth(struct rt_bandwidth *rt_b)
 
 static inline struct task_struct *rt_task_of(struct sched_rt_entity *rt_se)
 {
-#ifdef CONFIG_SCHED_DEBUG
 	WARN_ON_ONCE(!rt_entity_is_task(rt_se));
-#endif
+
 	return container_of(rt_se, struct task_struct, rt);
 }
 
@@ -1798,7 +1796,7 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rt_rq *rt_rq)
 	BUG_ON(idx >= MAX_RT_PRIO);
 
 	queue = array->queue + idx;
-	if (SCHED_WARN_ON(list_empty(queue)))
+	if (WARN_ON_ONCE(list_empty(queue)))
 		return NULL;
 	next = list_entry(queue->next, struct sched_rt_entity, run_list);
 
@@ -3008,6 +3006,7 @@ static int sched_rt_handler(const struct ctl_table *table, int write, void *buff
 	int ret;
 
 	mutex_lock(&mutex);
+	sched_domains_mutex_lock();
 	old_period = sysctl_sched_rt_period;
 	old_runtime = sysctl_sched_rt_runtime;
 
@@ -3034,6 +3033,7 @@ undo:
 		sysctl_sched_rt_period = old_period;
 		sysctl_sched_rt_runtime = old_runtime;
 	}
+	sched_domains_mutex_unlock();
 	mutex_unlock(&mutex);
 
 	return ret;
@@ -3065,7 +3065,6 @@ static int sched_rr_handler(const struct ctl_table *table, int write, void *buff
 }
 #endif /* CONFIG_SYSCTL */
 
-#ifdef CONFIG_SCHED_DEBUG
 void print_rt_stats(struct seq_file *m, int cpu)
 {
 	rt_rq_iter_t iter;
@@ -3076,4 +3075,3 @@ void print_rt_stats(struct seq_file *m, int cpu)
 		print_rt_rq(m, cpu, rt_rq);
 	rcu_read_unlock();
 }
-#endif /* CONFIG_SCHED_DEBUG */
